@@ -88,7 +88,7 @@ The script uses [anti-captcha.com](https://anti-captcha.com/) service to bypass 
   **cron** setup (more: https://help.ubuntu.com/community/CronHowto) :
 
   ```
-  $ sudo crontab -e
+  $ crontab -e
   ```
 
   paste (modify all paths correctly according to your setup):
@@ -178,13 +178,8 @@ Full info about the Google Drive python API can be found [here](https://develope
   - Click the file_download (Download JSON) button to the right of the client ID.
   - Move this file to your working directory and rename it *"client_secret.json"*
 
-2. Install the Google Client Library
-  - Run the following command to install the library using pip:
-  ```
-  pip install --upgrade google-api-python-client  or pip install --upgrade google-api-python-client-py3
-  ```
 
-3. Create credentials folder:
+2. Create credentials folder:
   - Simply, just fire up the script with *-sgd* argument; During first launch you will see a prompt in your browser asking for permissions, click then *allow*
   ```
   python packtPublishingFreeEbook.py -sgd
@@ -193,7 +188,7 @@ Full info about the Google Drive python API can be found [here](https://develope
   ```
   python packtPublishingFreeEbook.py -sgd --noauth_local_webserver
   ```  
-4. Already done!
+3. Already done!
   - Run the same command as above to claim and upload the eBook to Google Drive.
 
 
