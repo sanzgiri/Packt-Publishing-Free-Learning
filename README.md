@@ -44,131 +44,125 @@ The script uses [anti-captcha.com](https://anti-captcha.com/) service to bypass 
   ```
   python packtPublishingFreeEbook.py -gd
   ```
-  
+
   - Option *-da* [--dall] - downloads all ebooks from your account
   ```
   python packtPublishingFreeEbook.py -da
-  ```
-  
-  - Option *-dc* [--dchosen] - downloads chosen titles specified under *[download_book_titles]* field in *configFile.cfg*
-  ```
-  python packtPublishingFreeEbook.py -dc
   ```
 
   - Option *-sgd* [--sgd] - claims and uploads a book to *[gdFolderName]* folder onto Google Drive (more about setup Google Drive api in GOOGLE_DRIVE_API Setup)  
   ```
   python packtPublishingFreeEbook.py -sgd
   ```
-  
+
   - Option *-m* [--mail] - claims and sends an email with the newest book in PDF format (and MOBI if is also downloaded; see mail options confguration under [MAIL] path in *configFile.cfg*)
   ```
   python packtPublishingFreeEbook.py -m
   ```
-  
+
   - SubOption *-sm* [--status_mail] - sends fail report email whether script execution was successful
   ```
   python packtPublishingFreeEbook.py -gd -sm
   ```
-  
+
   - SubOption *-f* [--folder] - downloads an ebook into a created folder, named as ebook's title
   ```
   python packtPublishingFreeEbook.py -gd -f
   ```
-  
+
   - SubOption *-c* [--cfgpath] - selects folder where config file can be found (default: cwd)
   ```
   python packtPublishingFreeEbook.py -gd -c /home/usr/
   ```
-  
+
 2. You can set the script to be invoked automatically:
-  
+
   **LINUX** (tested on UBUNTU 16.04):
-  
+
   modify access permissions of the script:
-  
+
   ```
-  $ chmod a+x packtPublishingFreeEbook.py 
+  $ chmod a+x packtPublishingFreeEbook.py
   ```
-  
+
   **cron** setup (more: https://help.ubuntu.com/community/CronHowto) :
-  
+
   ```
   $ sudo crontab -e
   ```
-  
+
   paste (modify all paths correctly according to your setup):
-  
+
   ```
   0 12 * * * cd /home/me/Desktop/PacktScripts/ && /usr/bin/python3 packtPublishingFreeEbook.py -gd > /home/me/Desktop/PacktScripts/packtPublishingFreeEbook.log 2>&1
   ```
-  
+
   and save the crontab file. To verify if CRON fires up the script correctly, run a command:
-  
+
   ```
   $ sudo grep CRON /var/log/syslog
   ```
-  
+
   **WINDOWS** (tested on win7,8,10):
-  
+
   **schtasks.exe** setup (more info: https://technet.microsoft.com/en-us/library/cc725744.aspx) :
-  
+
   To create the task that will be called at 12:00 everyday, run the following command in **cmd** (modify all paths according to your setup):
-  
+
   ```
   schtasks /create /sc DAILY /tn "grabEbookFromPacktTask" /tr "C:\Users\me\Desktop\GrabPacktFreeBook\grabEbookFromPacktTask.bat" /st 12:00
   ```
-  
+
   To check if the "grabEbookFromPacktTask" has been added to all scheduled tasks on your computer:
-  
+
   ```
   schtasks /query
   ```
-  
+
   To run the task manually:
-  
+
   ```
   schtasks /run /tn "grabEbookFromPacktTask"
   ```  
-  
+
   To delete the task:
-  
+
   ```
   schtasks /delete /tn "grabEbookFromPacktTask"
   ```
-  
+
   If you want to log all downloads add -l switch to grabEbookFromPacktTask i.e.
   ```
   schtasks /create /sc DAILY /tn "grabEbookFromPacktTask" /tr "C:\Users\me\Desktop\GrabPacktFreeBook\grabEbookFromPacktTask.bat -l" /st 12:00
-  ``` 
-  
+  ```
+
   If you want to additionaly make command line windows stay open after download add -p switch i.e.
   ```
   schtasks /create /sc DAILY /tn "grabEbookFromPacktTask" /tr "C:\Users\me\Desktop\GrabPacktFreeBook\grabEbookFromPacktTask.bat -l -p" /st 12:00
-  ``` 
+  ```
 
-* EXAMPLE: download **'Unity 4.x Game AI Programming'** and  **'Multithreading in C# 5.0 Cookbook'** books in all available formats  (pdf, epub, mobi) with zipped source code file from your packt account
-  
-  To download chosen titles from your account, you must put them into **download_book_titles** in **configFile.cfg** as shown below:
-  
+* EXAMPLE: download all ebooks in all available formats  (pdf, epub, mobi) with zipped source code file from your Packt account
+
+  To download all ebooks in all available formats from your Packt account, you have to prepare your config file as shown below:
+
   **configFile.cfg** example:
   ```
     [LOGIN_DATA]
     email: youremail@youremail.com
     password: yourpassword    
-    
+
     [DOWNLOAD_DATA]
     download_folder_path: C:\Users\me\Desktop\myEbooksFromPackt
     download_formats: pdf, epub, mobi, code
-    download_book_titles: Unity 4.x Game AI Programming , Multithreading in C# 5.0 Cookbook
     ebook_extra_info_log_file_path: eBookMetadata.log
-    
+
     [GOOGLE_DRIVE_DATA]
     gd_app_name: GoogleDriveManager
     gd_folder_name: PACKT_EBOOKS
   ```
   run:
   ```
-    python packtPublishingFreeEbook.py -dc
+    python packtPublishingFreeEbook.py -da
   ```
 
 ### GOOGLE_DRIVE_API Setup:
@@ -188,7 +182,7 @@ Full info about the Google Drive python API can be found [here](https://develope
   - Run the following command to install the library using pip:
   ```
   pip install --upgrade google-api-python-client  or pip install --upgrade google-api-python-client-py3
-  ``` 
+  ```
 
 3. Create credentials folder:
   - Simply, just fire up the script with *-sgd* argument; During first launch you will see a prompt in your browser asking for permissions, click then *allow*

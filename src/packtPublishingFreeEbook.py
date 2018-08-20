@@ -2,16 +2,20 @@
 from __future__ import (absolute_import, division, print_function, unicode_literals)
 
 import argparse
+from collections import OrderedDict
+import configparser
 import datetime as dt
+from itertools import chain, product
 import logging
 import os
 import re
 import sys
 import time
-from collections import OrderedDict
-import configparser
-import requests
+
 from bs4 import BeautifulSoup
+import requests
+from requests.exceptions import ConnectionError
+from six.moves.urllib.parse import urljoin
 
 from utils.anticaptcha import Anticaptcha
 from utils.logger import get_logger
@@ -25,6 +29,11 @@ SUCCESS_EMAIL_SUBJECT = "{} New free Packt ebook: \"{}\""
 SUCCESS_EMAIL_BODY = "A new free Packt ebook \"{}\" was successfully grabbed. Enjoy!"
 FAILURE_EMAIL_SUBJECT = "{} Grabbing a new free Packt ebook failed"
 FAILURE_EMAIL_BODY = "Today's free Packt ebook grabbing has failed with exception: {}!\n\nCheck this out!"
+
+
+class PacktConnectionError(ConnectionError):
+    """Error raised whenever fetching data from Packt page fails."""
+    pass
 
 
 class ConfigurationModel(object):
@@ -46,7 +55,7 @@ class ConfigurationModel(object):
                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 '
                                           '(KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36'}
         self.my_packt_email, self.my_packt_password = self._get_config_login_data()
-        self.download_folder_path, self.download_formats, self.download_book_titles = self._get_config_download_data()
+        self.download_folder_path, self.download_formats = self._get_config_download_data()
         if not os.path.exists(self.download_folder_path):
             message = "Download folder path: '{}' doesn't exist".format(self.download_folder_path)
             logger.error(message)
@@ -67,15 +76,7 @@ class ConfigurationModel(object):
         download_path = self.configuration.get("DOWNLOAD_DATA", 'download_folder_path')
         download_formats = tuple(form.replace(' ', '') for form in
                                  self.configuration.get("DOWNLOAD_DATA", 'download_formats').split(','))
-        download_book_titles = None
-        try:
-            download_book_titles = [title.strip(' ') for title in
-                                    self.configuration.get("DOWNLOAD_DATA", 'download_book_titles').split(',')]
-            if len(download_book_titles) is 0:
-                download_book_titles = None
-        except configparser.Error:
-            pass
-        return download_path, download_formats, download_book_titles
+        return download_path, download_formats
 
     @staticmethod
     def convert_book_title_to_valid_string(title):
@@ -180,30 +181,49 @@ class PacktPublishingFreeEbook(object):
         self.__write_ebook_infodata(result_data)
         return result_data
 
-    def __get_my_all_books_data(self):
-        """Gets data from all available ebooks"""
-        logger.info("Getting data of all your books...")
+    def get_all_books_data(self):
+        """Fetch all user's ebooks data."""
+        logger.info("Getting your books data...")
         r = self.session.get(self.cfg.my_books_url, timeout=10)
         if r.status_code is not 200:
-            message = "Cannot open {}, http GET status code != 200".format(self.cfg.my_books_url)
+            message = 'Couldn\'t open {}.'.format(self.cfg.my_books_url)
             logger.error(message)
-            raise requests.exceptions.RequestException(message)
-        logger.info("Opened '{}' successfully!".format(self.cfg.my_books_url))
+            raise PacktConnectionError(message)
+        logger.info('{} has been successfully opened.'.format(self.cfg.my_books_url))
 
-        self.book_data = []
-        my_books_html = BeautifulSoup(r.text, 'html.parser')
-        all = my_books_html.find_all('div', {'class': 'product-line'})
-        for line in all:
-            if not line.get('nid'):
-                continue
-            title = line.find('div', {'class': 'title'}).getText().strip(' ').replace(' [eBook]', '')
-            download_urls = {}
-            for a in line.find_all('a'):
-                url = a.get('href')
-                for fm in self.download_formats:
-                    if url.find(fm) != -1:
-                        download_urls[fm] = url
-            self.book_data.append({'title': title, 'download_urls': download_urls})
+        my_books_pages = [self.cfg.my_books_url] + [
+            urljoin(self.cfg.packtpub_url, a.get('href')) for a in
+            BeautifulSoup(r.text, 'html.parser').find_all('a', {'class': 'solr-page-page-selector-page'})
+        ]
+        my_books_data = list(chain(*map(self.get_single_page_books_data, my_books_pages)))
+        logger.info('Books data has been successfully fetched.')
+        return my_books_data
+
+    def get_single_page_books_data(self, url):
+        """Fetch ebooks data from single user's pagination page."""
+        logger.info('Getting books data from {}...'.format(url))
+        r = self.session.get(url, timeout=10)
+        if r.status_code is not 200:
+            message = 'Couldn\'t open {}.'.format(url)
+            logger.error(message)
+            raise PacktConnectionError(message)
+        logger.info('Fetching books data from {}...'.format(url))
+
+        def get_book_data(div):
+            title = re.match('^\s*(.*?)(?:\s+\[eBook\])?\s*$', div.find('div', {'class': 'title'}).getText()).group(1)
+            urls = (a.get('href') for a in div.find_all('a'))
+            download_urls = {
+                format: urljoin(self.cfg.packtpub_url, url) for url, format
+                in product(urls, self.download_formats) if format in url
+            }
+            return {'title': title, 'download_urls': download_urls}
+
+        books_data = map(get_book_data, filter(
+            lambda div: div.get('nid'),
+            BeautifulSoup(r.text, 'html.parser').find_all('div', {'class': 'product-line'})
+        ))
+        logger.info('Books data from {} has been successfully fetched.'.format(url))
+        return books_data
 
     @login_required
     def grab_ebook(self, log_ebook_infodata=False):
@@ -240,18 +260,18 @@ class PacktPublishingFreeEbook(object):
         :param formats: tuple('pdf','mobi','epub','code');
         """
         # download ebook
-        self.__get_my_all_books_data()
+        my_books_data = self.get_all_books_data()
         if formats is None:
             formats = self.cfg.download_formats
             if formats is None:
                 formats = self.download_formats
         if titles is not None:
-            temp_book_data = [data for data in self.book_data
+            temp_book_data = [data for data in my_books_data
                               if any(ConfigurationModel.convert_book_title_to_valid_string(data['title']) ==
                                      ConfigurationModel.convert_book_title_to_valid_string(title) for title in
                                      titles)]
         else:  # download all
-            temp_book_data = self.book_data
+            temp_book_data = my_books_data
         if len(temp_book_data) == 0:
             logger.info("There is no books with provided titles: {} at your account!".format(titles))
         nr_of_books_downloaded = 0
@@ -282,11 +302,7 @@ class PacktPublishingFreeEbook(object):
                         else:
                             logger.info("Downloading eBook: '{}' in .{} format...".format(title, form))
                         try:
-                            r = self.session.get(
-                                self.cfg.packtpub_url + temp_book_data[i]['download_urls'][form],
-                                timeout=100,
-                                stream=True
-                            )
+                            r = self.session.get(temp_book_data[i]['download_urls'][form], timeout=100, stream=True)
                             if r.status_code is 200:
                                 with open(full_file_path, 'wb') as f:
                                     total_length = int(r.headers.get('content-length'))
@@ -337,8 +353,6 @@ if __name__ == '__main__':
                         action="store_true")
     parser.add_argument("-da", "--dall", help="downloads all ebooks from your account",
                         action="store_true")
-    parser.add_argument("-dc", "--dchosen", help="downloads chosen titles described in [download_book_titles] field",
-                        action="store_true")
     parser.add_argument("-sgd", "--sgd", help="sends the grabbed eBook to google drive",
                         action="store_true")
     parser.add_argument("-m", "--mail", help="send download to emails defined in config file", default=False,
@@ -378,11 +392,9 @@ if __name__ == '__main__':
                 )
 
         # Download book(s) into proper location
-        if args.grabd or args.dall or args.dchosen or args.sgd or args.mail:
+        if args.grabd or args.dall or args.sgd or args.mail:
             if args.dall:
                 ebook.download_books(into_folder=into_folder)
-            elif args.dchosen:
-                ebook.download_books(cfg.download_book_titles, into_folder=into_folder)
             elif args.grabd:
                 ebook.download_books([ebook.book_title], into_folder=into_folder)
             else:
