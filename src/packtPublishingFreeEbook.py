@@ -129,12 +129,10 @@ class PacktPublishingFreeEbook(object):
         logger.info("Session created, logged in successfully!")
 
     def __exists_book(self, title):
-        # TODO: reduce fetch pages
+        convert_book_title = ConfigurationModel.convert_book_title_to_valid_string
+        title = convert_book_title(title)
         my_books_data = self.get_all_books_data()
-        for data in my_books_data:
-            if ConfigurationModel.convert_book_title_to_valid_string(data['title']) == \
-                    ConfigurationModel.convert_book_title_to_valid_string(title):
-                return True
+        return any(convert_book_title(data['title']) == title for data in my_books_data)
 
     def __claim_ebook_captchaless(self, url, html):
         claim_url = html.find(attrs={'class': 'twelve-days-claim'})['href']
