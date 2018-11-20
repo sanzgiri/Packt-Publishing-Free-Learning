@@ -174,8 +174,11 @@ class PacktPublishingFreeEbook(object):
         author = page.find('div', {'class': 'book-top-block-info-authors'})
         result_data["author"] = author.text.strip().split("\n")[0]
         result_data["date_published"] = page.find('time').text
-        code_download_url = page.find('div', {'class': 'book-top-block-code'}).find('a').attrs['href']
-        result_data["code_files_url"] = self.cfg.packtpub_url + code_download_url
+        try:
+            code_download_url = page.find('div', {'class': 'book-top-block-code'}).find('a').attrs['href']
+            result_data["code_files_url"] = self.cfg.packtpub_url + code_download_url
+        except AttributeError:
+            pass  # There are no code files for this book.
         result_data["downloaded_at"] = time.strftime("%d-%m-%Y %H:%M")
         logger.success("Info data retrieved for '{}'".format(self.book_title))
         self.__write_ebook_infodata(result_data)
