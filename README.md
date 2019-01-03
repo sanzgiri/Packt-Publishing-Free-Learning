@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/igbt6/Packt-Publishing-Free-Learning.svg?branch=master)](https://travis-ci.org/igbt6/Packt-Publishing-Free-Learning)
+[![Build Status](https://travis-ci.org/luk6xff/Packt-Publishing-Free-Learning.svg?branch=master)](https://travis-ci.org/igbt6/Packt-Publishing-Free-Learning)
 
 ## Free Learning PacktPublishing script
 
