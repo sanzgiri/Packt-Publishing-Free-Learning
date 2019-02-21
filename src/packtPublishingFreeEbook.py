@@ -1,7 +1,6 @@
 import click
 import datetime as dt
 from itertools import chain
-import json
 import logging
 from math import ceil
 import os
@@ -14,6 +13,17 @@ import requests
 from requests.exceptions import ConnectionError
 from slugify import slugify
 
+from api import (
+    PacktAPIClient,
+    PACKT_API_PRODUCTS_URL,
+    PACKT_PRODUCT_SUMMARY_URL,
+    PACKT_API_PRODUCT_FILE_TYPES_URL,
+    PACKT_API_PRODUCT_FILE_DOWNLOAD_URL,
+    PACKT_API_FREE_LEARNING_OFFERS_URL,
+    PACKT_API_USER_URL,
+    PACKT_API_FREE_LEARNING_CLAIM_URL,
+    DEFAULT_PAGINATION_SIZE
+)
 from utils.anticaptcha import Anticaptcha
 from utils.logger import get_logger
 
@@ -32,17 +42,6 @@ USER_AGENT_HEADER = {
     'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36'
 }
 PACKT_FREE_LEARNING_URL = 'https://www.packtpub.com/packt/offers/free-learning/'
-
-DEFAULT_PAGINATION_SIZE = 25
-PACKT_API_LOGIN_URL = 'https://services.packtpub.com/auth-v1/users/tokens'
-PACKT_API_PRODUCTS_URL = 'https://services.packtpub.com/entitlements-v1/users/me/products'
-PACKT_PRODUCT_SUMMARY_URL = 'https://static.packt-cdn.com/products/{product_id}/summary'
-PACKT_API_PRODUCT_FILE_TYPES_URL = 'https://services.packtpub.com/products-v1/products/{product_id}/types'
-PACKT_API_PRODUCT_FILE_DOWNLOAD_URL =\
-    'https://services.packtpub.com/products-v1/products/{product_id}/files/{file_type}'
-PACKT_API_FREE_LEARNING_OFFERS_URL = 'https://services.packtpub.com/free-learning-v1/offers'
-PACKT_API_USER_URL = 'https://services.packtpub.com/users-v1/users/me'
-PACKT_API_FREE_LEARNING_CLAIM_URL = 'https://services.packtpub.com/free-learning-v1/users/{user_id}/claims/{offer_id}'
 
 
 def slugify_book_title(title):
@@ -64,7 +63,6 @@ class ConfigurationModel(object):
         self.configuration = configparser.ConfigParser()
         if not self.configuration.read(self.cfg_file_path):
             raise configparser.Error('{} file not found'.format(self.cfg_file_path))
-        self.book_infodata_log_file = self._get_config_ebook_extrainfo_log_filename()
         self.anticaptcha_clientkey = self.configuration.get("ANTICAPTCHA_DATA", 'key')
         self.my_packt_email, self.my_packt_password = self._get_config_login_data()
         self.download_folder_path, self.download_formats = self._get_config_download_data()
@@ -72,10 +70,6 @@ class ConfigurationModel(object):
             message = "Download folder path: '{}' doesn't exist".format(self.download_folder_path)
             logger.error(message)
             raise ValueError(message)
-
-    def _get_config_ebook_extrainfo_log_filename(self):
-        """Gets the filename of the ebook metadata log file."""
-        return self.configuration.get("DOWNLOAD_DATA", 'ebook_extra_info_log_file_path')
 
     def _get_config_login_data(self):
         """Gets user login credentials."""
@@ -95,54 +89,36 @@ class PacktPublishingFreeEbook(object):
     """Contains some methods to claim, download or send a free daily ebook"""
 
     download_formats = ('pdf', 'mobi', 'epub', 'code')
-    jwt = None
 
     def __init__(self, cfg):
         self.cfg = cfg
         self.book_title = ""
 
-    def login_required(func, *args, **kwargs):
-        def login_decorated(self, *args, **kwargs):
-            if self.jwt is None:
-                self.fetch_jwt()
-            return func(self, *args, **kwargs)
-        return login_decorated
-
-    def fetch_jwt(self):
-        """Fetch user's JWT to be used when making Packt API requests."""
-        response = requests.post(PACKT_API_LOGIN_URL, data=json.dumps({
-            'username': self.cfg.my_packt_email,
-            'password': self.cfg.my_packt_password,
-        }))
-        try:
-            self.jwt = response.json().get('data').get('access')
-            logger.info('JWT token has been fetched successfully!')
-        except Exception:
-            logger.error('Fetching JWT token failed!')
-
-    def get_all_books_data(self):
+    def get_all_books_data(self, api_client):
         """Fetch all user's ebooks data."""
         logger.info("Getting your books data...")
         try:
-            response = requests.get(PACKT_API_PRODUCTS_URL, headers={'authorization': 'Bearer {}'.format(self.jwt)})
+            response = api_client.get(PACKT_API_PRODUCTS_URL)
             pages_total = int(ceil(response.json().get('count') / DEFAULT_PAGINATION_SIZE))
-            my_books_data = list(chain(*map(self.get_single_page_books_data, range(pages_total))))
+            my_books_data = list(chain(*map(
+                lambda page: self.get_single_page_books_data(api_client, page),
+                range(pages_total)
+            )))
             logger.info('Books data has been successfully fetched.')
             return my_books_data
         except (AttributeError, TypeError):
             logger.error('Couldn\'t fetch user\'s books data.')
 
-    def get_single_page_books_data(self, page):
+    def get_single_page_books_data(self, api_client, page):
         """Fetch ebooks data from single products API pagination page."""
         try:
-            response = requests.get(
+            response = api_client.get(
                 PACKT_API_PRODUCTS_URL,
                 params={
                     'sort': 'createdAt:DESC',
                     'offset': DEFAULT_PAGINATION_SIZE * page,
                     'limit': DEFAULT_PAGINATION_SIZE
-                },
-                headers={'authorization': 'Bearer {}'.format(self.jwt)}
+                }
             )
             return [{'id': t['productId'], 'title': t['productName']} for t in response.json().get('data')]
         except Exception:
@@ -160,38 +136,32 @@ class PacktPublishingFreeEbook(object):
         anticaptcha = Anticaptcha(self.cfg.anticaptcha_clientkey)
         return anticaptcha.solve_recaptcha(PACKT_FREE_LEARNING_URL, website_key)
 
-    @login_required
-    def grab_ebook(self):
+    def grab_ebook(self, api_client):
         """Grab Packt Free Learning ebook."""
         logger.info("Start grabbing ebook...")
 
         utc_today = dt.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-        offer_response = requests.get(
+        offer_response = api_client.get(
             PACKT_API_FREE_LEARNING_OFFERS_URL,
             params={
                 'dateFrom': utc_today.isoformat(),
                 'dateTo': (utc_today + dt.timedelta(days=1)).isoformat()
-            },
-            headers={'authorization': 'Bearer {}'.format(self.jwt)}
+            }
         )
         [offer_data] = offer_response.json().get('data')
         offer_id = offer_data.get('id')
         product_id = offer_data.get('productId')
 
-        user_response = requests.get(PACKT_API_USER_URL, headers={'authorization': 'Bearer {}'.format(self.jwt)})
+        user_response = api_client.get(PACKT_API_USER_URL)
         [user_data] = user_response.json().get('data')
         user_id = user_data.get('id')
 
-        claim_response = requests.put(
+        claim_response = api_client.put(
             PACKT_API_FREE_LEARNING_CLAIM_URL.format(user_id=user_id, offer_id=offer_id),
-            data=json.dumps({'recaptcha': self.solve_packt_recapcha()}),
-            headers={'authorization': 'Bearer {}'.format(self.jwt)}
+            json={'recaptcha': self.solve_packt_recapcha()}
         )
 
-        product_response = requests.get(
-            PACKT_PRODUCT_SUMMARY_URL.format(product_id=product_id),
-            headers={'authorization': 'Bearer {}'.format(self.jwt)}
-        )
+        product_response = api_client.get(PACKT_PRODUCT_SUMMARY_URL.format(product_id=product_id))
         self.book_title = product_response.json()['title'] if product_response.status_code == 200 else self.book_title
 
         if claim_response.status_code == 200:
@@ -201,8 +171,7 @@ class PacktPublishingFreeEbook(object):
         else:
             logger.error('Claiming Packt Free Learning book has failed.')
 
-    @login_required
-    def download_books(self, titles=None, formats=None, into_folder=False):
+    def download_books(self, api_client, titles=None, formats=None, into_folder=False):
         """
         Downloads the ebooks.
         :param titles: list('C# tutorial', 'c++ Tutorial') ;
@@ -211,10 +180,7 @@ class PacktPublishingFreeEbook(object):
         def get_product_download_urls(product_id):
             error_message = 'Couldn\'t fetch download URLs for product {}.'.format(product_id)
             try:
-                response = requests.get(
-                    PACKT_API_PRODUCT_FILE_TYPES_URL.format(product_id=product_id),
-                    headers={'authorization': 'Bearer {}'.format(self.jwt)}
-                )
+                response = api_client.get(PACKT_API_PRODUCT_FILE_TYPES_URL.format(product_id=product_id))
                 if response.status_code == 200:
                     return {
                         format: PACKT_API_PRODUCT_FILE_DOWNLOAD_URL.format(product_id=product_id, file_type=format)
@@ -226,7 +192,7 @@ class PacktPublishingFreeEbook(object):
             except Exception:
                 raise PacktConnectionError(error_message)
         # download ebook
-        my_books_data = self.get_all_books_data()
+        my_books_data = self.get_all_books_data(api_client)
         if formats is None:
             formats = self.cfg.download_formats
             if formats is None:
@@ -264,16 +230,8 @@ class PacktPublishingFreeEbook(object):
                         else:
                             logger.info("Downloading eBook: '{}' in .{} format...".format(title, format))
                         try:
-                            file_url = requests.get(
-                                download_url,
-                                headers={'authorization': 'Bearer {}'.format(self.jwt)}
-                            ).json().get('data')
-                            r = requests.get(
-                                file_url,
-                                headers={'authorization': 'Bearer {}'.format(self.jwt)},
-                                timeout=100,
-                                stream=True
-                            )
+                            file_url = api_client.get(download_url).json().get('data')
+                            r = api_client.get(file_url, timeout=100, stream=True)
                             if r.status_code is 200:
                                 with open(full_file_path, 'wb') as f:
                                     total_length = int(r.headers.get('content-length'))
@@ -334,10 +292,11 @@ def packt_cli(cfgpath, grab, grabd, dall, sgd, mail, status_mail, folder, noauth
     try:
         cfg = ConfigurationModel(config_file_path)
         ebook = PacktPublishingFreeEbook(cfg)
+        api_client = PacktAPIClient(cfg.my_packt_email, cfg.my_packt_password)
 
         # Grab the newest book
         if grab or grabd or sgd or mail:
-            ebook.grab_ebook()
+            ebook.grab_ebook(api_client)
 
             # Send email about successful book grab. Do it only when book
             # isn't going to be emailed as we don't want to send email twice.
@@ -355,12 +314,12 @@ def packt_cli(cfgpath, grab, grabd, dall, sgd, mail, status_mail, folder, noauth
         # Download book(s) into proper location.
         if grabd or dall or sgd or mail:
             if dall:
-                ebook.download_books(into_folder=into_folder)
+                ebook.download_books(api_client, into_folder=into_folder)
             elif grabd:
-                ebook.download_books([ebook.book_title], into_folder=into_folder)
+                ebook.download_books(api_client, [ebook.book_title], into_folder=into_folder)
             else:
                 cfg.download_folder_path = os.getcwd()
-                ebook.download_books([ebook.book_title], into_folder=into_folder)
+                ebook.download_books(api_client, [ebook.book_title], into_folder=into_folder)
 
         # Send downloaded book(s) by mail or to Google Drive.
         if sgd or mail:
