@@ -4,7 +4,7 @@ from setuptools import find_packages, setup
 with open(os.path.join(os.path.dirname(__file__), 'README.md')) as f:
     long_description = f.read()
 
-package_version = '1.5.2'
+package_version = '1.5.3'
 
 requirements = [
     'click==7.1.1',
@@ -44,7 +44,7 @@ setup(
             'packt-cli = packtPublishingFreeEbook:packt_cli',
         ],
     },
-    download_url='https://github.com/luk6xff/Packt-Publishing-Free-Learning/archive/v1.5.2.tar.gz',
+    download_url='https://github.com/luk6xff/Packt-Publishing-Free-Learning/archive/v1.5.3.tar.gz',
     classifiers=[
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
