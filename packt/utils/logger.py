@@ -10,7 +10,7 @@ def get_logger(module_name, log_folder_path=os.getcwd()):
         module_name just to distinguish where the logs come from
     """
 
-    LOG_FILE_PATH = os.path.join(log_folder_path, "LOG_FILE.log")
+    LOG_FILE_PATH = os.path.join("/tmp", "LOG_FILE.log")
 
     # adding a new logging level
     logging.SUCCESS = 19   # as ALL = 0, DEBUG = 10, INFO = 20, WARN = 30, ERROR = 40, FATAL = CRITICAL, CRITICAL = 50
